@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.example.mcart">
+    <!-- 所有文件访问权限：MC 的资源/游戏目录定死在 /sdcard/.minecraft，
+         需要 MANAGE_EXTERNAL_STORAGE 才能读写共享存储（targetSdk 36）。 -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29"/>
+    <application android:label="Minecraft" android:appCategory="game" android:isGame="true" android:largeHeap="true" android:debuggable="true" android:vmSafeMode="false" android:extractNativeLibs="true" android:hasCode="true" android:requestLegacyExternalStorage="true">
+        <activity android:name=".MainActivity" android:exported="true"/>
+        <activity android:name=".MuActivity" android:exported="true"/>
+        <activity android:name=".DiagActivity" android:exported="true"/>
+        <activity android:name=".DiagSysActivity" android:exported="true"/>
+        <activity android:name=".Diag2Activity" android:exported="true"/>
+        <activity android:name=".Diag3Activity" android:exported="true"/>
+        <activity android:name=".Diag4Activity" android:exported="true"/>
+        <activity android:name=".GlfwProbeActivity" android:exported="true"
+                  android:label="Minecraft"
+                  android:appCategory="game"
+                  android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+                  android:screenOrientation="sensorLandscape"
+                  android:configChanges="orientation|keyboardHidden|keyboard|navigation|screenSize|screenLayout|smallestScreenSize|uiMode|density|fontScale|layoutDirection|locale">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        <activity android:name=".SdlProbeActivity" android:exported="true"
+                  android:configChanges="orientation|keyboardHidden|screenSize"
+                  android:label="SDL probe"/>
+    </application>
+</manifest>

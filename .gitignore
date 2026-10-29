@@ -1,0 +1,45 @@
+# ── 派生产物 / 大二进制：不入库（可随时重建）──
+*.jar
+*.apk
+*.so
+*.dex
+*.class
+*.zip
+*.bak
+.tmp/
+*.log
+
+# 反编译源码（51MB，补丁的唯一来源但体积太大；用 26.2-client.jar 重新反编译可得）
+26.2-src-e/
+
+# 依赖库原始/补丁后 jar（110MB ×2）
+libs26/
+libs-patched/
+libsdex/
+mcdex2/
+mcr8/
+
+# LWJGL / SDL 源码克隆与构建产物（250MB）
+vendor/
+
+# 探针工程里除源码外的全部（APK 367MB）
+mcprobe/build/
+mcprobe/dex/
+mcprobe/assets/
+mcprobe/icures/
+mcprobe/lib-arm64/
+mcprobe/stage/
+mcprobe/*.apk
+
+# 构建中间产物
+patch/out/
+lwjglbuild/out/
+lwjglbuild/*.so
+lwjglbuild/*.o
+logres/
+
+# 临时备份 / 诊断快照
+*.bak*
+*.orig
+*.diag
+*.idsig

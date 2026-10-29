@@ -1,0 +1,164 @@
+{
+  "targets": {
+    "bloom_a": {},
+    "bloom_b": {},
+    "swap": {}
+  },
+  "passes": [
+    {
+      "vertex_shader": "minecraft:core/screenquad",
+      "fragment_shader": "minecraft:post/art_bright",
+      "inputs": [
+        {
+          "sampler_name": "In",
+          "target": "minecraft:main"
+        }
+      ],
+      "output": "bloom_a",
+      "uniforms": {
+        "BrightConfig": [
+          {
+            "name": "Threshold",
+            "type": "float",
+            "value": 0.75
+          },
+          {
+            "name": "Knee",
+            "type": "float",
+            "value": 0.25
+          }
+        ]
+      }
+    },
+    {
+      "vertex_shader": "minecraft:core/screenquad",
+      "fragment_shader": "minecraft:post/art_blur",
+      "inputs": [
+        {
+          "sampler_name": "In",
+          "target": "bloom_a"
+        }
+      ],
+      "output": "bloom_b",
+      "uniforms": {
+        "BlurConfig": [
+          {
+            "name": "Direction",
+            "type": "vec2",
+            "value": [
+              1.0,
+              0.0
+            ]
+          },
+          {
+            "name": "Radius",
+            "type": "float",
+            "value": 1.0
+          }
+        ]
+      }
+    },
+    {
+      "vertex_shader": "minecraft:core/screenquad",
+      "fragment_shader": "minecraft:post/art_blur",
+      "inputs": [
+        {
+          "sampler_name": "In",
+          "target": "bloom_b"
+        }
+      ],
+      "output": "bloom_a",
+      "uniforms": {
+        "BlurConfig": [
+          {
+            "name": "Direction",
+            "type": "vec2",
+            "value": [
+              0.0,
+              1.0
+            ]
+          },
+          {
+            "name": "Radius",
+            "type": "float",
+            "value": 1.0
+          }
+        ]
+      }
+    },
+    {
+      "vertex_shader": "minecraft:core/screenquad",
+      "fragment_shader": "minecraft:post/art_composite",
+      "inputs": [
+        {
+          "sampler_name": "In",
+          "target": "minecraft:main"
+        },
+        {
+          "sampler_name": "Bloom",
+          "target": "bloom_a"
+        }
+      ],
+      "output": "swap",
+      "uniforms": {
+        "EnhanceConfig": [
+          {
+            "name": "BloomIntensity",
+            "type": "float",
+            "value": 0.55
+          },
+          {
+            "name": "Exposure",
+            "type": "float",
+            "value": 1.06
+          },
+          {
+            "name": "Saturation",
+            "type": "float",
+            "value": 1.12
+          },
+          {
+            "name": "Contrast",
+            "type": "float",
+            "value": 1.08
+          },
+          {
+            "name": "Vignette",
+            "type": "float",
+            "value": 0.42
+          },
+          {
+            "name": "Sharpen",
+            "type": "float",
+            "value": 0.35
+          }
+        ]
+      }
+    },
+    {
+      "vertex_shader": "minecraft:core/screenquad",
+      "fragment_shader": "minecraft:post/blit",
+      "inputs": [
+        {
+          "sampler_name": "In",
+          "target": "swap"
+        }
+      ],
+      "output": "minecraft:main",
+      "uniforms": {
+        "BlitConfig": [
+          {
+            "name": "ColorModulate",
+            "type": "vec4",
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

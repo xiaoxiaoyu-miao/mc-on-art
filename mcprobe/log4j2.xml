@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 放在 APK 根（classpath），让 MC 的 log4j 不再退化成「只打 ERROR」的默认配置。
+     Android 上 stdout 会进 logcat（tag: System.out）。 -->
+<Configuration status="WARN">
+  <Appenders>
+    <Console name="SysOut" target="SYSTEM_OUT">
+      <PatternLayout pattern="%d{HH:mm:ss.SSS} %-5level %logger{0} - %msg%n"/>
+    </Console>
+  </Appenders>
+  <Loggers>
+    <Logger name="net.minecraft" level="DEBUG" additivity="false">
+      <AppenderRef ref="SysOut"/>
+    </Logger>
+    <Logger name="com.mojang" level="INFO" additivity="false">
+      <AppenderRef ref="SysOut"/>
+    </Logger>
+    <Root level="INFO">
+      <AppenderRef ref="SysOut"/>
+    </Root>
+  </Loggers>
+</Configuration>
