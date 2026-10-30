@@ -157,6 +157,7 @@ public class GlfwProbeActivity extends SDLActivity {
             mWinW = dm.widthPixels; mWinH = dm.heightPixels;
         }
         Log.i("GLFWPROBE", "窗口真实尺寸 = " + mWinW + "x" + mWinH);
+        applySurfaceFixedSize();
 
         // 堆上限报告：Android 的堆由 ART 决定，不是 -Xmx
         //   largeHeap=false -> heapgrowthlimit；largeHeap=true -> heapsize
@@ -564,6 +565,7 @@ public class GlfwProbeActivity extends SDLActivity {
     protected void onResume() {
         super.onResume();
         hideSystemBars();
+        applySurfaceFixedSize();   // surface 重建后要重新固定 buffer 尺寸
         attachFpsOverlay();    // 幂等：SDL 布局被重建时重新挂上
         attachVctlOverlay();   // 幂等：SDL 的 mLayout 被重建/我们的 View 被摘掉时重新挂上
     }
@@ -610,6 +612,41 @@ public class GlfwProbeActivity extends SDLActivity {
                     + "（仅绘制，不吃触摸）");
         } catch (Throwable t) {
             Log.e("GLFWPROBE", "VCTL 浮层挂载失败（游戏照常运行，只是看不见按钮）", t);
+        }
+    }
+
+    // ── 内部渲染分辨率（SurfaceView.setFixedSize + 合成器拉伸）────────────
+    /**
+     * 把 SDL 的 SurfaceView buffer 固定成缩小尺寸（视图仍是全屏，合成器拉伸）。
+     *
+     * 为什么不用 SDL_SetWindowSize：Android 上 SDL 窗口尺寸恒等于 SurfaceView 的
+     * 视图尺寸，SDL_SetWindowSize 对真实 buffer 无效（实测 buffer 仍是 2378x1080），
+     * 而 SDL 创建 EGL surface 时还会用 setBuffersGeometry(0,0) 重置 geometry。
+     * SurfaceHolder.setFixedSize 才是「buffer 固定小尺寸、视图铺满」的正确入口。
+     *
+     * 时序：必须在 SDL_GL_CreateContext 之前生效（本方法 onCreate 就调），
+     * 且 shim 侧把 glfwGetFramebufferSize 返回值换成缩小后的尺寸，两者大小一致。
+     */
+    private void applySurfaceFixedSize() {
+        if (mCfg.renderScale >= 0.995f) return;
+        try {
+            android.view.ViewGroup layout = (android.view.ViewGroup) getContentView();
+            if (layout == null) { Log.w("GLFWPROBE", "Surface 固定尺寸：SDL 布局还没建好"); return; }
+            int sw = Math.max(160, Math.round(mWinW * mCfg.renderScale));
+            int sh = Math.max(120, Math.round(mWinH * mCfg.renderScale));
+            for (int i = 0; i < layout.getChildCount(); i++) {
+                android.view.View v = layout.getChildAt(i);
+                if (v instanceof android.view.SurfaceView) {
+                    ((android.view.SurfaceView) v).getHolder().setFixedSize(sw, sh);
+                    VctlOverlay.setRenderScale(mCfg.renderScale);   // 浮层按 1/scale 画
+                    Log.i("GLFWPROBE", "Surface fixedSize = " + sw + "x" + sh
+                            + "（renderScale=" + mCfg.renderScale + "，视图仍全屏，合成器拉伸）");
+                    return;
+                }
+            }
+            Log.w("GLFWPROBE", "Surface 固定尺寸：没找到 SurfaceView（子 View 数=" + layout.getChildCount() + "）");
+        } catch (Throwable t) {
+            Log.e("GLFWPROBE", "Surface 固定尺寸设置失败", t);
         }
     }
 

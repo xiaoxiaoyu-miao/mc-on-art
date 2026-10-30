@@ -61,7 +61,7 @@ public class SettingsActivity extends Activity {
         // ── 显示 ──
         section("显示");
         tvRenderScale = label("内部渲染分辨率：100%");
-        sbRenderScale = seek(50, 100, Math.round(cfg.renderScale * 100), p -> {
+        sbRenderScale = seek(20, 100, Math.round(cfg.renderScale * 100), p -> {
             cfg.renderScale = p / 100f;
             tvRenderScale.setText("内部渲染分辨率：" + p + "%"
                     + (p >= 100 ? "（原生）" : "（" + (int) (2378 * p / 100f) + "×" + (int) (1080 * p / 100f) + "，硬件拉伸）"));
@@ -231,7 +231,7 @@ public class SettingsActivity extends Activity {
     /** 从控件收集当前值（控件回调已经写进 cfg，这里补 quickPlay） */
     private void collect() {
         cfg.quickPlay = cbQuickPlay.isChecked() ? "" : "-";
-        if (cfg.renderScale < 0.5f) cfg.renderScale = 0.5f;
+        if (cfg.renderScale < 0.2f) cfg.renderScale = 0.2f;
         if (cfg.renderScale > 1.0f) cfg.renderScale = 1.0f;
         if (cfg.fpsLimit < 20) cfg.fpsLimit = 20;
         if (cfg.fpsLimit > 260) cfg.fpsLimit = 260;

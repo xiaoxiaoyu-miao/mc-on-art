@@ -36,6 +36,19 @@ public class VctlOverlay extends View {
 
     private static final int REFRESH_MS = 33;          // ≈30Hz 刷新（够跟手，又不费电）
 
+    /**
+     * 内部渲染分辨率缩放（由 GlfwProbeActivity 在建窗后设置）。
+     * native 给的矩形是「buffer 像素」空间（宽高已乘过 scale），
+     * 而本 View 画在「视图像素」空间（整屏），所以要乘 1/scale 还原。
+     */
+    private static float sRenderScale = 1.0f;
+    public static void setRenderScale(float s) {
+        sRenderScale = (s > 0.05f && s <= 1.0f) ? s : 1.0f;
+    }
+    private static float invScale() {
+        return sRenderScale >= 0.995f ? 1.0f : 1.0f / sRenderScale;
+    }
+
     private static native int    nativeCount();
     private static native String nativeName(int i);
     private static native String nativeLabel(int i);
@@ -159,6 +172,8 @@ public class VctlOverlay extends View {
             // IN_GAME 的键在菜单里隐藏（FCL 的 visibilityType 语义）
             if (mVis[i] == 1 && !inGame) continue;
             nativeRect(i, mTmp);
+            final float k = invScale();
+            mTmp[0] *= k; mTmp[1] *= k; mTmp[2] *= k; mTmp[3] *= k;
             float w = mTmp[2], h = mTmp[3];
             if (w <= 1f || h <= 1f) continue;   // 已禁用（w/h=0）
             final boolean pressed = (st & (1 << i)) != 0;
@@ -167,6 +182,7 @@ public class VctlOverlay extends View {
         }
 
         // 移动控件：十字键(D-pad) 或 摇杆，只在游戏内显示
+        final float k2 = invScale();
         if (inGame) {
             if ((st & BIT_DPAD_MODE) != 0) {
                 // 十字键贴图：3x3 全画 —— 四条主向 + **四个斜角** + 中心潜行。
@@ -185,13 +201,16 @@ public class VctlOverlay extends View {
 
                 // 先用中心格（col=1,row=1 的「潜」）求出网格中心，后面所有贴图都朝它收拢
                 float cx = 0f, cy = 0f;
+                final float ks = invScale();
                 nativeDpadCellRect(1, 1, mTmp);
+                mTmp[0] *= ks; mTmp[1] *= ks; mTmp[2] *= ks; mTmp[3] *= ks;
                 cx = mTmp[0] + mTmp[2] * 0.5f;
                 cy = mTmp[1] + mTmp[3] * 0.5f;
 
                 for (int row = 0; row < 3; row++) {
                     for (int col = 0; col < 3; col++) {
                         nativeDpadCellRect(col, row, mTmp);
+                        mTmp[0] *= ks; mTmp[1] *= ks; mTmp[2] *= ks; mTmp[3] *= ks;
                         float w = mTmp[2], h = mTmp[3];
                         if (w <= 1f || h <= 1f) continue;      // 格子太小/未启用
 
@@ -221,6 +240,7 @@ public class VctlOverlay extends View {
                 }
             } else {
                 nativeStickRect(mTmp);
+                mTmp[0] *= k2; mTmp[1] *= k2; mTmp[2] *= k2; mTmp[3] *= k2;
                 float w = mTmp[2], h = mTmp[3];
                 if (w > 1f && h > 1f) {
                     drawStick(canvas, mTmp[0], mTmp[1], w, h, stickOn);
@@ -235,6 +255,7 @@ public class VctlOverlay extends View {
             final int sel = nativeHotbarSel();
             for (int i = 0; i < hn; i++) {
                 nativeHotbarRect(i, mTmp);
+                mTmp[0] *= k2; mTmp[1] *= k2; mTmp[2] *= k2; mTmp[3] *= k2;
                 float w = mTmp[2], h = mTmp[3];
                 if (w <= 1f || h <= 1f) continue;      // 该槽不可用
                 drawButton(canvas, mTmp[0], mTmp[1], w, h, String.valueOf(i + 1), i == sel);

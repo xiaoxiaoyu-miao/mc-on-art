@@ -13,8 +13,22 @@
 #include <jni.h>
 
 #define SHIMLOG(...) __android_log_print(ANDROID_LOG_INFO, "GLFWSHIM", __VA_ARGS__)
+/* 关键路径同时落盘：logcat 在 ColorOS 上会被限流/清空 */
+static void shim_flog(const char *fmt, ...)
+{
+    static FILE *fp = NULL;
+    if (!fp) fp = fopen("/sdcard/.minecraft/glfwshim.log", "a");
+    if (!fp) return;
+    va_list ap; va_start(ap, fmt);
+    vfprintf(fp, fmt, ap);
+    va_end(ap);
+    fputc('\n', fp);
+    fflush(fp);
+}
 #include <math.h>
 #include <stdio.h>
+#include <stdarg.h>
+#include <unistd.h>
 #include <stdint.h>
 
 /* ------------------------------------------------------------------ */
@@ -457,6 +471,27 @@ void glfwWindowHintString(int hint, const char *value) { (void)hint; (void)value
 /* ------------------------------------------------------------------ */
 /* 窗口                                                                 */
 /* ------------------------------------------------------------------ */
+/* 内部渲染分辨率：把「想要的窗口尺寸」按 sRenderScale 缩小（min 320x240）。
+ * 建窗和之后 MC 的每一次 setWindowMonitor / setWindowSize 都要过这里，
+ * 否则 MC 进全屏时会用 video mode 的原生尺寸再设一次，把缩放覆盖掉。 */
+static void shim_scale_dims(int *w, int *h)
+{
+    if (sRenderScale >= 0.995f) return;
+    int sw = (int)(*w * sRenderScale + 0.5f);
+    int sh = (int)(*h * sRenderScale + 0.5f);
+    if (sw < 160) sw = 160;
+    if (sh < 120) sh = 120;
+    *w = sw;
+    *h = sh;
+}
+
+/* 把内部光标坐标（窗口像素空间）换成 MC 期望的 framebuffer 空间再回调 */
+static void shim_notify_cursor(void)
+{
+    if (!cbCursorPos) return;
+    cbCursorPos(&sWin, sCursorX, sCursorY);   /* 光标坐标 = buffer 空间，与 MC 一致 */
+}
+
 GLFWwindow *glfwCreateWindow(int width, int height, const char *title,
                              GLFWmonitor *monitor, GLFWwindow *share)
 {
@@ -485,19 +520,17 @@ GLFWwindow *glfwCreateWindow(int width, int height, const char *title,
     if (hintResizable) flags |= SDL_WINDOW_RESIZABLE;
     flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
 
+    shim_flog("[%d] glfwCreateWindow 进入 req=%dx%d renderScale=%.2f", (int)getpid(), width, height, sRenderScale);
     /* 内部渲染分辨率：直接按缩放后的尺寸建窗。
        这样 SDL 会把 Surface 的 buffer 也建成这个尺寸（合成器负责拉满屏），
        MC 拿到的 framebufferSize / 视口 / 鼠标坐标全部自洽 —— 不会出现画面被裁切。
        注意不要在 EGL 上下文创建之后再去 setBuffersGeometry：那会让 MC 的视口
        比 buffer 大，表现为「画面有一角跑到屏幕外」。 */
-    if (sRenderScale < 0.995f) {
-        int sw = (int)(width * sRenderScale + 0.5f);
-        int sh = (int)(height * sRenderScale + 0.5f);
-        if (sw < 320) sw = 320;
-        if (sh < 240) sh = 240;
-        SHIMLOG("renderScale=%.2f: 建窗尺寸 %dx%d -> %dx%d", sRenderScale, width, height, sw, sh);
-        width = sw;
-        height = sh;
+    {
+        int ow = width, oh = height;
+        shim_scale_dims(&width, &height);
+        if (width != ow || height != oh)
+            SHIMLOG("renderScale=%.2f: 建窗尺寸 %dx%d -> %dx%d", sRenderScale, ow, oh, width, height);
     }
 
     SHIMLOG("createWindow: %dx%d flags=0x%x needsES=%d ctxMajor=%d", width, height, (unsigned)flags, 1, hintCtxMajor);
@@ -521,6 +554,10 @@ GLFWwindow *glfwCreateWindow(int width, int height, const char *title,
     SDL_GL_MakeCurrent(w, sWin.gl);
 
     SDL_GetWindowSizeInPixels(w, &sWin.width, &sWin.height);
+    shim_flog("[%d] SDL 建窗后真实 buffer = %dx%d (renderScale=%.2f)",
+              (int)getpid(), sWin.width, sWin.height, sRenderScale);
+    /* Buffer 已经是缩小尺寸（Java 侧 SurfaceHolder.setFixedSize 控制，合成器拉伸），
+     * 直接用 SDL 报的真实尺寸 —— 不要在这里再乘一次 renderScale。 */
     SDL_GetWindowPosition(w, &sWin.posx, &sWin.posy);
     sWin.shouldClose = 0;
     sWin.focused = 1;
@@ -594,8 +631,13 @@ void glfwGetWindowSize(GLFWwindow *window, int *width, int *height)
 void glfwSetWindowSize(GLFWwindow *window, int width, int height)
 {
     if (window && window->sdl) {
-        SDL_SetWindowSize(window->sdl, width, height);
-        SDL_GetWindowSizeInPixels(window->sdl, &window->width, &window->height);
+        int ow = width, oh = height;
+        shim_scale_dims(&width, &height);
+        if (width != ow || height != oh)
+            SHIMLOG("setWindowSize: %dx%d -> %dx%d（renderScale=%.2f，不改真实 buffer）",
+                    ow, oh, width, height, sRenderScale);
+        window->width = width;
+        window->height = height;
     }
 }
 
@@ -625,9 +667,18 @@ void glfwSetWindowMonitor(GLFWwindow *window, GLFWmonitor *monitor,
 {
     (void)monitor; (void)refreshRate;
     if (!window || !window->sdl) return;
-    if (width > 0 && height > 0) SDL_SetWindowSize(window->sdl, width, height);
+    /* Android 上 SDL_SetWindowSize 改不了真实 buffer（SurfaceView 尺寸决定），
+     * 渲染缩放走 Java 的 setFixedSize；这里只更新记录，不再调 SDL。 */
+    if (width > 0 && height > 0 && sRenderScale < 0.995f) {
+        width  = (int)(width  * sRenderScale + 0.5f);
+        height = (int)(height * sRenderScale + 0.5f);
+        if (width < 160) width = 160;
+        if (height < 120) height = 120;
+        SHIMLOG("setWindowMonitor(缩放后) = %dx%d", width, height);
+    }
     if (xpos || ypos) SDL_SetWindowPosition(window->sdl, xpos, ypos);
     SDL_GetWindowSizeInPixels(window->sdl, &window->width, &window->height);
+    SHIMLOG("setWindowMonitor 后实际 buffer = %dx%d", window->width, window->height);
 }
 
 GLFWmonitor *glfwGetWindowMonitor(GLFWwindow *window) { (void)window; return NULL; }
@@ -660,7 +711,16 @@ GLFWwindow *glfwGetCurrentContext(void) { return sWin.sdl ? &sWin : NULL; }
 
 void glfwSwapBuffers(GLFWwindow *window)
 {
-    if (window && window->sdl) SDL_GL_SwapWindow(window->sdl);
+    if (window && window->sdl) {
+        static int sSwapLog = 0;
+        if (sSwapLog < 3) {
+            int bw = 0, bh = 0;
+            SDL_GetWindowSizeInPixels(window->sdl, &bw, &bh);
+            shim_flog("[%d] swap#%d 真实 buffer=%dx%d (MC 认为 %dx%d)",
+                      (int)getpid(), ++sSwapLog, bw, bh, window->width, window->height);
+        }
+        SDL_GL_SwapWindow(window->sdl);
+    }
 }
 
 void glfwSwapInterval(int interval) { SDL_GL_SetSwapInterval(interval); }
@@ -1149,7 +1209,7 @@ static void vctl_move_cursor(double dxPx, double dyPx)
         sCursorX += dxPx * k;
         sCursorY += dyPx * k;
         sCursorPosValid = 1;
-        if (cbCursorPos) cbCursorPos(&sWin, sCursorX, sCursorY);
+        shim_notify_cursor();
     } else {
         /* 菜单模式：绝对坐标，钳制在窗口内（GUI 命中测试要求合法范围） */
         double w = (sWin.width  > 0 ? sWin.width  : 1);
@@ -1163,7 +1223,7 @@ static void vctl_move_cursor(double dxPx, double dyPx)
         sCursorX = nx;
         sCursorY = ny;
         sCursorPosValid = 1;
-        if (cbCursorPos) cbCursorPos(&sWin, sCursorX, sCursorY);
+        shim_notify_cursor();
     }
 }
 
@@ -1176,7 +1236,7 @@ static void vctl_set_cursor_abs(double nx, double ny)
     if (x < 0) x = 0; if (x > w - 1) x = w - 1;
     if (y < 0) y = 0; if (y > h - 1) y = h - 1;
     sCursorX = x; sCursorY = y; sCursorPosValid = 1;
-    if (cbCursorPos) cbCursorPos(&sWin, sCursorX, sCursorY);
+    shim_notify_cursor();
 }
 
 /* ------------------------------------------------------------------ */
@@ -1692,7 +1752,10 @@ static int vctl_handle_finger(const SDL_Event *e)
         } else if (t->kind == VCTL_T_STICK) {
             vctl_stick_update(t, nx * (float)W, ny * (float)H);
         } else if (t->kind == VCTL_T_LOOK && (dxPx != 0.0 || dyPx != 0.0)) {
-            vctl_move_cursor(dxPx, dyPx);
+            /* 手感补偿：buffer 缩了 renderScale 倍，视角增量按 1/scale 还原，
+             * 保证 20% 和 100% 时同样的手指滑动转同样的角度 */
+            double feelK = (sRenderScale >= 0.995f) ? 1.0 : 1.0 / (double)sRenderScale;
+            vctl_move_cursor(dxPx * feelK, dyPx * feelK);
             if (sVctlDebug)
                 VCTL_LOG("视角拖动 d=(%.1f,%.1f)px -> 光标=(%.1f,%.1f)",
                          dxPx, dyPx, sCursorX, sCursorY);
@@ -2120,7 +2183,7 @@ static void deliverEvent(const SDL_Event *e)
                 sCursorY = (double)e->motion.y;
             }
             sCursorPosValid = 1;
-            if (cbCursorPos) cbCursorPos(&sWin, sCursorX, sCursorY);
+            shim_notify_cursor();
             break;
         case SDL_EVENT_MOUSE_WHEEL:
             if (cbScroll) cbScroll(&sWin, e->wheel.x, e->wheel.y);
@@ -2264,6 +2327,7 @@ int glfwGetKeyScancode(int key) { return glfwkey_to_scancode(key); }
 
 void glfwSetCursorPos(GLFWwindow *window, double xpos, double ypos)
 {
+    /* MC 传的就是 buffer 空间坐标，直接存 */
     if (sCursorMode == GLFW_CURSOR_DISABLED) {
         /* 相对模式：warp 会污染增量，只更新虚拟坐标 */
         sCursorX = xpos;
@@ -2619,6 +2683,6 @@ JNIEXPORT void JNICALL
 Java_com_example_mcart_GlfwProbeActivity_nativeSetRenderScale(JNIEnv *env, jclass cls, jfloat scale)
 {
     (void)env; (void)cls;
-    sRenderScale = (scale > 0.2f && scale <= 1.0f) ? scale : 1.0f;
+    sRenderScale = (scale >= 0.2f && scale <= 1.0f) ? scale : 1.0f;
     SHIMLOG("nativeSetRenderScale -> %.3f", sRenderScale);
 }
