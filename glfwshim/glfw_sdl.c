@@ -272,6 +272,12 @@ static int hintDepthBits   = 24;
 static int hintStencilBits = 8;
 static int hintDoubleBuf   = GLFW_TRUE;
 
+/* 内部渲染分辨率缩放（0.5~1.0）。不需要 patch MC 的渲染流程：
+ * 直接按缩放后的尺寸建窗，SDL 把 Surface 的 buffer 建成这个尺寸，
+ * 合成器负责拉满屏（硬件拉伸）；MC 拿到的 framebufferSize/视口/鼠标坐标全部自洽。
+ * 必须在 glfwCreateWindow 之前设置（见 nativeSetRenderScale）。 */
+static float sRenderScale = 1.0f;
+
 /* ------------------------------------------------------------------ */
 /* 错误处理                                                             */
 /* ------------------------------------------------------------------ */
@@ -478,6 +484,21 @@ GLFWwindow *glfwCreateWindow(int width, int height, const char *title,
     SDL_WindowFlags flags = SDL_WINDOW_OPENGL;
     if (hintResizable) flags |= SDL_WINDOW_RESIZABLE;
     flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
+
+    /* 内部渲染分辨率：直接按缩放后的尺寸建窗。
+       这样 SDL 会把 Surface 的 buffer 也建成这个尺寸（合成器负责拉满屏），
+       MC 拿到的 framebufferSize / 视口 / 鼠标坐标全部自洽 —— 不会出现画面被裁切。
+       注意不要在 EGL 上下文创建之后再去 setBuffersGeometry：那会让 MC 的视口
+       比 buffer 大，表现为「画面有一角跑到屏幕外」。 */
+    if (sRenderScale < 0.995f) {
+        int sw = (int)(width * sRenderScale + 0.5f);
+        int sh = (int)(height * sRenderScale + 0.5f);
+        if (sw < 320) sw = 320;
+        if (sh < 240) sh = 240;
+        SHIMLOG("renderScale=%.2f: 建窗尺寸 %dx%d -> %dx%d", sRenderScale, width, height, sw, sh);
+        width = sw;
+        height = sh;
+    }
 
     SHIMLOG("createWindow: %dx%d flags=0x%x needsES=%d ctxMajor=%d", width, height, (unsigned)flags, 1, hintCtxMajor);
     SDL_Window *w = SDL_CreateWindow(title ? title : "Minecraft",
@@ -2588,4 +2609,16 @@ Java_com_example_mcart_GlfwProbeActivity_nativeSetSoftKeyboard(JNIEnv *env, jobj
         SDL_StopTextInput(sWin.sdl);
         SHIMLOG("软键盘: SDL_StopTextInput()");
     }
+}
+
+/* ------------------------------------------------------------------ */
+/* 内部渲染分辨率（给 GlfwProbeActivity 用）                            */
+/* 必须在 glfwCreateWindow 之前调用；改了之后要重启游戏才生效。         */
+/* ------------------------------------------------------------------ */
+JNIEXPORT void JNICALL
+Java_com_example_mcart_GlfwProbeActivity_nativeSetRenderScale(JNIEnv *env, jclass cls, jfloat scale)
+{
+    (void)env; (void)cls;
+    sRenderScale = (scale > 0.2f && scale <= 1.0f) ? scale : 1.0f;
+    SHIMLOG("nativeSetRenderScale -> %.3f", sRenderScale);
 }

@@ -65,6 +65,8 @@ public class GlfwProbeActivity extends SDLActivity {
     private android.os.Handler mDragHandler;
     private McConfig mCfg = new McConfig();
     private boolean mCfgLoaded = false;
+    /** 内部渲染分辨率缩放（0.5~1.0），必须在建窗前传给 shim */
+    private static native void nativeSetRenderScale(float scale);
     private long mWindow = 0;
 
     @Override
@@ -121,6 +123,13 @@ public class GlfwProbeActivity extends SDLActivity {
             Log.i("GLFWPROBE", "McConfig 已加载（fpsOverlay=" + mCfg.showFpsOverlay + "）");
         } catch (Throwable t) {
             Log.w("GLFWPROBE", "McConfig 读取失败，用默认值", t);
+        }
+        // 内部渲染分辨率：必须在 glfwCreateWindow 之前设置（建窗时就按缩小后的 buffer 开）
+        try {
+            nativeSetRenderScale(mCfg.renderScale);
+            Log.i("GLFWPROBE", "渲染分辨率缩放 = " + mCfg.renderScale);
+        } catch (Throwable t) {
+            Log.e("GLFWPROBE", "nativeSetRenderScale 失败", t);
         }
 
         super.onCreate(state);
