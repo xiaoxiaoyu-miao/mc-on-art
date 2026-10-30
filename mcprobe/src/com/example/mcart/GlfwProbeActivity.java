@@ -54,6 +54,17 @@ public class GlfwProbeActivity extends SDLActivity {
     }
 
     private volatile boolean mRunning = true;
+
+    // ── 悬浮帧率（长按 400ms 后拖动；位置存 SharedPreferences "art-overlay"）──
+    private android.widget.TextView mFpsView;
+    private volatile net.minecraft.client.Minecraft mMcRef;
+    private final android.os.Handler mUiHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private float mDownRawX, mDownRawY;
+    private int mDownLeft, mDownTop;
+    private boolean mDragging;
+    private android.os.Handler mDragHandler;
+    private McConfig mCfg = new McConfig();
+    private boolean mCfgLoaded = false;
     private long mWindow = 0;
 
     @Override
@@ -103,7 +114,17 @@ public class GlfwProbeActivity extends SDLActivity {
             Log.i("GLFWPROBE", "后处理链 art.posteffect=默认(true)（无 posteffect.txt）");
         }
 
+        // 「MC 设置」写的外部配置：悬浮帧率开关等（文件不存在就用默认值）
+        try {
+            mCfg = McConfig.load();
+            mCfgLoaded = true;
+            Log.i("GLFWPROBE", "McConfig 已加载（fpsOverlay=" + mCfg.showFpsOverlay + "）");
+        } catch (Throwable t) {
+            Log.w("GLFWPROBE", "McConfig 读取失败，用默认值", t);
+        }
+
         super.onCreate(state);
+        attachFpsOverlay();
         attachVctlOverlay();
         // 屏幕常亮，并尽量缩短等待：Android 上 App 一旦失焦 Surface 就会销毁，
         // 而 SDL_GL_CreateContext 会一直等 Surface，导致 glfwCreateWindow 卡死。
@@ -511,6 +532,8 @@ public class GlfwProbeActivity extends SDLActivity {
                 // 靠 swapBuffers 的 vsync 阻塞控制帧率，不是忙等。
                 // 性能采样：每 10 秒把 FPS / 堆 / 渲染距离打到 logcat，
                 // 免得靠肉眼看左上角数字（也方便我远程量化）。
+                mMcRef = mc;
+                startFpsOverlayUpdater();
                 startPerfSampler(mc);
 
                 Log.i("GLFWPROBE", "进入 mc.run() 主循环 ...");
@@ -532,6 +555,7 @@ public class GlfwProbeActivity extends SDLActivity {
     protected void onResume() {
         super.onResume();
         hideSystemBars();
+        attachFpsOverlay();    // 幂等：SDL 布局被重建时重新挂上
         attachVctlOverlay();   // 幂等：SDL 的 mLayout 被重建/我们的 View 被摘掉时重新挂上
     }
 
@@ -578,6 +602,138 @@ public class GlfwProbeActivity extends SDLActivity {
         } catch (Throwable t) {
             Log.e("GLFWPROBE", "VCTL 浮层挂载失败（游戏照常运行，只是看不见按钮）", t);
         }
+    }
+
+    // ── 悬浮帧率（可拖动）────────────────────────────────────────────────
+    private int dp(int v) {
+        return Math.round(getResources().getDisplayMetrics().density * v);
+    }
+
+    /** 把悬浮层限制在屏幕内（长按拖动时用） */
+    private void clampOverlay(android.widget.RelativeLayout.LayoutParams l) {
+        android.view.ViewGroup parent = (android.view.ViewGroup) mFpsView.getParent();
+        if (parent == null) return;
+        int maxLeft = Math.max(0, parent.getWidth() - mFpsView.getWidth());
+        int maxTop  = Math.max(0, parent.getHeight() - mFpsView.getHeight());
+        l.leftMargin = Math.max(0, Math.min(maxLeft, l.leftMargin));
+        l.topMargin  = Math.max(0, Math.min(maxTop, l.topMargin));
+    }
+
+    /** 挂 FPS 悬浮层（onCreate / onResume 都调，幂等） */
+    private void attachFpsOverlay() {
+        if (!mCfg.showFpsOverlay) { Log.i("GLFWPROBE", "FPS 悬浮层：配置里关闭"); return; }
+        try {
+            if (mFpsView != null && mFpsView.getParent() != null) return;   // 已挂着
+            android.view.ViewGroup layout = (android.view.ViewGroup) getContentView();
+            if (layout == null) { Log.w("GLFWPROBE", "FPS 悬浮层：拿不到 SDL 布局"); return; }
+            if (!(layout instanceof android.widget.RelativeLayout)) {
+                Log.w("GLFWPROBE", "FPS 悬浮层：根布局不是 RelativeLayout（"
+                        + layout.getClass().getSimpleName() + "），跳过");
+                return;
+            }
+
+            android.widget.TextView tv = new android.widget.TextView(this);
+            tv.setText("-- fps");
+            tv.setTextColor(0xFFE8EAED);
+            tv.setTextSize(13f);
+            tv.setShadowLayer(3f, 0f, 0f, 0xFF000000);
+            tv.setPadding(dp(10), dp(3), dp(10), dp(3));
+            tv.setBackgroundColor(0x66000000);
+            tv.setGravity(android.view.Gravity.CENTER);
+
+            android.widget.RelativeLayout.LayoutParams lp = new android.widget.RelativeLayout.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+            android.content.SharedPreferences sp = getSharedPreferences("art-overlay", MODE_PRIVATE);
+            lp.leftMargin = sp.getInt("left", dp(72));   // 往里缩，避开 R 角
+            lp.topMargin  = sp.getInt("top",  dp(8));
+            layout.addView(tv, lp);
+
+            mFpsView = tv;
+
+            // ── 长按后拖动 ──
+            mDragHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+            final Runnable longPress = () -> {
+                mDragging = true;
+                tv.setAlpha(0.75f);
+                tv.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS);
+            };
+
+            tv.setOnTouchListener((v, ev) -> {
+                android.widget.RelativeLayout.LayoutParams l =
+                        (android.widget.RelativeLayout.LayoutParams) v.getLayoutParams();
+                switch (ev.getActionMasked()) {
+                    case android.view.MotionEvent.ACTION_DOWN:
+                        mDownRawX = ev.getRawX();
+                        mDownRawY = ev.getRawY();
+                        mDownLeft = l.leftMargin;
+                        mDownTop = l.topMargin;
+                        mDragging = false;
+                        mDragHandler.postDelayed(longPress, 400);
+                        return true;
+                    case android.view.MotionEvent.ACTION_MOVE:
+                        if (!mDragging) { return true; }
+                        l.leftMargin = mDownLeft + (int) (ev.getRawX() - mDownRawX);
+                        l.topMargin  = mDownTop  + (int) (ev.getRawY() - mDownRawY);
+                        clampOverlay(l);
+                        v.setLayoutParams(l);
+                        return true;
+                    case android.view.MotionEvent.ACTION_UP:
+                    case android.view.MotionEvent.ACTION_CANCEL:
+                        mDragHandler.removeCallbacks(longPress);
+                        tv.setAlpha(1.0f);
+                        if (mDragging) {
+                            mDragging = false;
+                            getSharedPreferences("art-overlay", MODE_PRIVATE).edit()
+                                    .putInt("left", l.leftMargin)
+                                    .putInt("top", l.topMargin)
+                                    .apply();
+                            Log.i("GLFWPROBE", "FPS 悬浮层位置已记住: " + l.leftMargin + "," + l.topMargin);
+                        }
+                        return true;
+                }
+                return true;
+            });
+
+            Log.i("GLFWPROBE", "FPS 悬浮层已挂上（左 " + lp.leftMargin + " 上 " + lp.topMargin
+                    + "，长按可拖动）");
+        } catch (Throwable t) {
+            Log.e("GLFWPROBE", "FPS 悬浮层挂载失败", t);
+        }
+    }
+
+    /** 每 500ms 刷新一次文本（MC 的 getFps() 是最近 1 秒的帧数） */
+    private void startFpsOverlayUpdater() {
+        if (mFpsView == null) return;
+        Thread t = new Thread(() -> {
+            while (mRunning) {
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    return;
+                }
+                net.minecraft.client.Minecraft mc = mMcRef;
+                String txt;
+                if (mc == null) {
+                    txt = "-- fps";
+                } else {
+                    txt = mc.getFps() + " fps";
+                    if (mCfg.renderScale < 0.995f) {
+                        txt = txt + "  " + Math.round(mCfg.renderScale * 100) + "%";
+                    }
+                }
+                final String text = txt;
+                final android.widget.TextView tv = mFpsView;
+                if (tv != null) {
+                    mUiHandler.post(() -> {
+                        try { tv.setText(text); } catch (Throwable ignored) {}
+                    });
+                }
+            }
+        }, "fps-overlay");
+        t.setDaemon(true);
+        t.start();
+        Log.i("GLFWPROBE", "FPS 悬浮层刷新线程已启动");
     }
 
     @Override
