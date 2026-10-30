@@ -2,7 +2,14 @@
 set -e
 cd /data/data/com.termux/files/home/mc-work/mcprobe
 AJ=/data/data/com.termux/files/usr/opt/android-sdk/platforms/android-36/android.jar
-aapt2 link -o base.apk --manifest AndroidManifest.xml -I "$AJ" --min-sdk-version 21 --target-sdk-version 36
+# 资源（settings 图标等）：res/ -> .flat -> link
+FLATS=""
+if [ -d res ]; then
+  rm -rf res.compiled && mkdir -p res.compiled
+  aapt2 compile --dir res -o res.compiled
+  FLATS=$(ls res.compiled/*.flat 2>/dev/null | tr '\n' ' ')
+fi
+aapt2 link -o base.apk --manifest AndroidManifest.xml -I "$AJ" --min-sdk-version 21 --target-sdk-version 36 $FLATS
 rm -rf stage && mkdir -p stage
 cp dex/classes.dex stage/classes.dex
 if [ -d assets/assets ]; then cp -r assets/assets stage/assets; fi

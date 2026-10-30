@@ -26,6 +26,18 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- ★ 第二个桌面入口：「MC 设置」——一个 APK 两个图标两个入口 ──
+             自己画的 mipmap（齿轮+滑杆），不用系统图标；点它直接进设置页。 -->
+        <activity android:name=".SettingsActivity" android:exported="true"
+                  android:label="MC 设置"
+                  android:icon="@mipmap/ic_settings"
+                  android:theme="@android:style/Theme.Material.NoActionBar"
+                  android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|uiMode|density|fontScale|layoutDirection|locale">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
         <activity android:name=".SdlProbeActivity" android:exported="true"
                   android:configChanges="orientation|keyboardHidden|screenSize"
                   android:label="SDL probe"/>

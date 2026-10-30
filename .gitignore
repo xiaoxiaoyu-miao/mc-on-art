@@ -43,3 +43,6 @@ logres/
 *.orig
 *.diag
 *.idsig
+
+# 资源编译中间产物（aapt2 compile 输出）
+mcprobe/res.compiled/

@@ -104,6 +104,7 @@ public class GlfwProbeActivity extends SDLActivity {
         }
 
         super.onCreate(state);
+        attachVctlOverlay();
         // 屏幕常亮，并尽量缩短等待：Android 上 App 一旦失焦 Surface 就会销毁，
         // 而 SDL_GL_CreateContext 会一直等 Surface，导致 glfwCreateWindow 卡死。
         getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -531,12 +532,52 @@ public class GlfwProbeActivity extends SDLActivity {
     protected void onResume() {
         super.onResume();
         hideSystemBars();
+        attachVctlOverlay();   // 幂等：SDL 的 mLayout 被重建/我们的 View 被摘掉时重新挂上
     }
 
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) hideSystemBars();
+    }
+
+    // ── 虚拟触屏按键浮层（只绘制，不吃触摸；命中判定在 libglfw.so 的 VCTL 里）──
+    private VctlOverlay mVctlView;
+
+    /**
+     * 虚拟触屏按键的可见浮层（onCreate / onResume 都调，幂等）。
+     *
+     * 挂载点必须是 SDL 自己那个装 mSurface 的 RelativeLayout（SDLActivity.mLayout，
+     * 通过 getContentView() 拿到）：不要用 addContentView()，那是往 android.R.id.content
+     * 上挂，SDLActivity 一旦再 setContentView(mLayout) 就会把我们的 View 顶掉。
+     *
+     * overlay 只负责画、不吃触摸（onTouchEvent 返回 false、不 clickable），
+     * RelativeLayout 会继续把事件派给下面的 mSurface，命中判定仍由 libglfw.so 的 VCTL 逻辑负责。
+     */
+    private void attachVctlOverlay() {
+        try {
+            android.view.ViewGroup layout = (android.view.ViewGroup) getContentView();
+            if (layout == null) {
+                Log.w("GLFWPROBE", "VCTL 浮层：SDL 布局还没建好，稍后 onResume 再试");
+                return;
+            }
+            if (mVctlView == null) {
+                mVctlView = new VctlOverlay(this);
+                Log.i("GLFWPROBE", "VCTL 浮层：新建 View");
+            }
+            if (mVctlView.getParent() != null) {
+                return;                                  // 已经挂着，幂等返回
+            }
+            android.view.ViewGroup.LayoutParams lp = new android.view.ViewGroup.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT);
+            layout.addView(mVctlView, lp);               // 兄弟节点，后加者在上层
+            mVctlView.bringToFront();
+            Log.i("GLFWPROBE", "VCTL 浮层已挂到 " + layout.getClass().getSimpleName()
+                    + "（仅绘制，不吃触摸）");
+        } catch (Throwable t) {
+            Log.e("GLFWPROBE", "VCTL 浮层挂载失败（游戏照常运行，只是看不见按钮）", t);
+        }
     }
 
     @Override
