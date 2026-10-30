@@ -637,8 +637,25 @@ public class GlfwProbeActivity extends SDLActivity {
             for (int i = 0; i < layout.getChildCount(); i++) {
                 android.view.View v = layout.getChildAt(i);
                 if (v instanceof android.view.SurfaceView) {
-                    ((android.view.SurfaceView) v).getHolder().setFixedSize(sw, sh);
+                    android.view.SurfaceView sv = (android.view.SurfaceView) v;
+                    /* ★ 关键：SDL 用 mLayout.addView(mSurface)（默认 WRAP_CONTENT），
+                     * setFixedSize 会把 View 自身也缩到 buffer 尺寸（缩在角落）。
+                     * 必须把 View 强制铺满，让 SurfaceFlinger 去拉伸 buffer。 */
+                    android.view.ViewGroup.LayoutParams lp = sv.getLayoutParams();
+                    if (lp == null) {
+                        lp = new android.view.ViewGroup.LayoutParams(
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                android.view.ViewGroup.LayoutParams.MATCH_PARENT);
+                    } else {
+                        lp.width  = android.view.ViewGroup.LayoutParams.MATCH_PARENT;
+                        lp.height = android.view.ViewGroup.LayoutParams.MATCH_PARENT;
+                    }
+                    sv.setLayoutParams(lp);
+                    sv.getHolder().setFixedSize(sw, sh);
+                    sv.requestLayout();
                     VctlOverlay.setRenderScale(mCfg.renderScale);   // 浮层按 1/scale 画
+                    Log.i("GLFWPROBE", "SurfaceView 铺满: view=" + sv.getWidth() + "x" + sv.getHeight()
+                            + " buffer=" + sw + "x" + sh);
                     Log.i("GLFWPROBE", "Surface fixedSize = " + sw + "x" + sh
                             + "（renderScale=" + mCfg.renderScale + "，视图仍全屏，合成器拉伸）");
                     return;

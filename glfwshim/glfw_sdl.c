@@ -471,6 +471,19 @@ void glfwWindowHintString(int hint, const char *value) { (void)hint; (void)value
 /* ------------------------------------------------------------------ */
 /* 窗口                                                                 */
 /* ------------------------------------------------------------------ */
+/* 真实渲染尺寸（Surface buffer 像素）。内部渲染分辨率缩放时 SDL 的
+ * WINDOW_RESIZED 事件会把 sWin 改成窗口/视图尺寸（2378x1080），而实际 buffer
+ * 只有 476x216 —— 凡是「和画面像素打交道」的地方都必须向 SDL 现查。
+ * VCTL 的布局矩形与触摸命中、MC 的 framebuffer/window 尺寸都走这里。 */
+static void shim_px_size(int *w, int *h)
+{
+    int pw = 0, ph = 0;
+    if (sWin.sdl) SDL_GetWindowSizeInPixels(sWin.sdl, &pw, &ph);
+    if (pw <= 0 || ph <= 0) { pw = sWin.width; ph = sWin.height; }
+    if (w) *w = pw;
+    if (h) *h = ph;
+}
+
 /* 内部渲染分辨率：把「想要的窗口尺寸」按 sRenderScale 缩小（min 320x240）。
  * 建窗和之后 MC 的每一次 setWindowMonitor / setWindowSize 都要过这里，
  * 否则 MC 进全屏时会用 video mode 的原生尺寸再设一次，把缩放覆盖掉。 */
@@ -624,8 +637,11 @@ void glfwSetWindowPos(GLFWwindow *window, int xpos, int ypos)
 
 void glfwGetWindowSize(GLFWwindow *window, int *width, int *height)
 {
-    if (width)  *width  = window ? window->width  : 0;
-    if (height) *height = window ? window->height : 0;
+    int w = 0, h = 0;
+    shim_px_size(&w, &h);
+    if (w <= 0 || h <= 0) { w = window ? window->width : 0; h = window ? window->height : 0; }
+    if (width)  *width  = w;
+    if (height) *height = h;
 }
 
 void glfwSetWindowSize(GLFWwindow *window, int width, int height)
@@ -643,7 +659,9 @@ void glfwSetWindowSize(GLFWwindow *window, int width, int height)
 
 void glfwGetFramebufferSize(GLFWwindow *window, int *width, int *height)
 {
-    if (window && window->sdl) SDL_GetWindowSizeInPixels(window->sdl, &window->width, &window->height);
+    int w = 0, h = 0;
+    shim_px_size(&w, &h);
+    if (w > 0 && h > 0) { window->width = w; window->height = h; }
     if (width)  *width  = window ? window->width  : 0;
     if (height) *height = window ? window->height : 0;
 }
@@ -1097,7 +1115,8 @@ static int vctl_dpad_rect(int idx, float *ox0, float *oy0, float *ox1, float *oy
 
 static void vctl_layout(void)
 {
-    int W = sWin.width, H = sWin.height;
+    int W, H;
+    shim_px_size(&W, &H);
     if (W <= 0 || H <= 0) return;
     if (W == sVctlLayoutW && H == sVctlLayoutH) return;
     sVctlLayoutW = W; sVctlLayoutH = H;
@@ -1212,8 +1231,10 @@ static void vctl_move_cursor(double dxPx, double dyPx)
         shim_notify_cursor();
     } else {
         /* 菜单模式：绝对坐标，钳制在窗口内（GUI 命中测试要求合法范围） */
-        double w = (sWin.width  > 0 ? sWin.width  : 1);
-        double h = (sWin.height > 0 ? sWin.height : 1);
+        int cw = 0, ch = 0;
+        shim_px_size(&cw, &ch);
+        double w = (cw > 0 ? cw : 1);
+        double h = (ch > 0 ? ch : 1);
         double nx = sCursorX + dxPx * k;
         double ny = sCursorY + dyPx * k;
         if (nx < 0) nx = 0;
@@ -1230,8 +1251,10 @@ static void vctl_move_cursor(double dxPx, double dyPx)
 /* 菜单模式：手指按下即把光标放到该点（点哪指哪） */
 static void vctl_set_cursor_abs(double nx, double ny)
 {
-    double w = (sWin.width  > 0 ? sWin.width  : 1);
-    double h = (sWin.height > 0 ? sWin.height : 1);
+    int cw = 0, ch = 0;
+    shim_px_size(&cw, &ch);
+    double w = (cw > 0 ? cw : 1);
+    double h = (ch > 0 ? ch : 1);
     double x = nx * w, y = ny * h;
     if (x < 0) x = 0; if (x > w - 1) x = w - 1;
     if (y < 0) y = 0; if (y > h - 1) y = h - 1;
@@ -1641,7 +1664,8 @@ static int vctl_handle_finger(const SDL_Event *e)
         t->lastX = nx; t->lastY = ny;
         t->downX = nx; t->downY = ny;
 
-        int W = sWin.width, H = sWin.height;
+        int W, H;
+        shim_px_size(&W, &H);
         float px = nx * (float)(W > 0 ? W : 1);
         float py = ny * (float)(H > 0 ? H : 1);
 
@@ -1722,6 +1746,12 @@ static int vctl_handle_finger(const SDL_Event *e)
         int W = sWin.width, H = sWin.height;
         if (W <= 0 || H <= 0) { t->lastX = nx; t->lastY = ny; return 1; }
 
+        {
+            int W2 = 0, H2 = 0;
+            shim_px_size(&W2, &H2);
+            if (W2 > 0) W = W2;
+            if (H2 > 0) H = H2;
+        }
         double dxPx = (double)(nx - t->lastX) * (double)W;
         double dyPx = (double)(ny - t->lastY) * (double)H;
         t->lastX = nx; t->lastY = ny;
@@ -2070,7 +2100,8 @@ static void deliverEvent(const SDL_Event *e)
             break;
         case SDL_EVENT_WINDOW_RESIZED:
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: {
-            int w = e->window.data1, h = e->window.data2;
+            int w = 0, h = 0;
+            shim_px_size(&w, &h);            /* 用真实 buffer 尺寸，忽略窗口尺寸 */
             sWin.width = w; sWin.height = h;
             if (cbWinSize) cbWinSize(&sWin, w, h);
             if (cbFbSize)  cbFbSize(&sWin, w, h);

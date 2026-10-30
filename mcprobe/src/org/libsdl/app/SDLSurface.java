@@ -273,19 +273,27 @@ public class SDLSurface extends SurfaceView implements SurfaceHolder.Callback,
 
     private float getNormalizedX(float x)
     {
-        if (mWidth <= 1) {
+        /* MotionEvent 的 x 是「视图坐标」；内部渲染分辨率缩放时，surface buffer
+         * 尺寸（mWidth，可能只有视图的 20%）会小于视图尺寸。直接用 mWidth 归一化
+         * 会让归一化值偏大（触控/虚拟按键命中全挤到左上角），所以优先用视图宽度。 */
+        float w = getWidth();
+        if (w <= 1) w = mWidth;
+        if (w <= 1) {
             return 0.5f;
         } else {
-            return (x / (mWidth - 1));
+            return (x / (w - 1));
         }
     }
 
     private float getNormalizedY(float y)
     {
-        if (mHeight <= 1) {
+        /* 同 getNormalizedX：优先用视图高度归一化 */
+        float h = getHeight();
+        if (h <= 1) h = mHeight;
+        if (h <= 1) {
             return 0.5f;
         } else {
-            return (y / (mHeight - 1));
+            return (y / (h - 1));
         }
     }
 
