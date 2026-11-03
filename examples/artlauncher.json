@@ -1,0 +1,18 @@
+{
+  "renderScale": 0.20000000298023224,
+  "fpsLimit": 260,
+  "lowPrecisionShaders": true,
+  "postEffect": false,
+  "shaderPreset": 2,
+  "graphicsPreset": "fast",
+  "renderDistance": 2,
+  "simulationDistance": 5,
+  "particles": 2,
+  "mipmapLevels": 0,
+  "entityShadows": false,
+  "ambientOcclusion": false,
+  "guiScale": 0,
+  "graphicsBackend": "gles",
+  "showFpsOverlay": true,
+  "quickPlay": ""
+}

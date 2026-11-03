@@ -46,3 +46,6 @@ logres/
 
 # 资源编译中间产物（aapt2 compile 输出）
 mcprobe/res.compiled/
+
+# 补丁生成的 MC 反编译源码（由 make_patches.py 从 26.2-src-e 生成，不入库）
+patch/src/

@@ -1,7 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/bash
 set -e
-cd /data/data/com.termux/files/home/mc-work/mcprobe
-AJ=/data/data/com.termux/files/usr/opt/android-sdk/platforms/android-36/android.jar
+cd "$(dirname "$0")"
+AJ=${ANDROID_JAR:-/data/data/com.termux/files/usr/opt/android-sdk/platforms/android-36/android.jar}
 # 资源（settings 图标等）：res/ -> .flat -> link
 FLATS=""
 if [ -d res ]; then
