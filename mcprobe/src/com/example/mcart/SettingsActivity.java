@@ -53,6 +53,7 @@ public class SettingsActivity extends Activity {
         root.setPadding(dp(20), dp(20), dp(20), dp(32));
         sc.addView(root);
         setContentView(sc);
+        requestStoragePermission();
 
         title("Minecraft on ART · 设置");
         note("这些设置写 " + McConfig.PATH + "，游戏启动时读取。进游戏改设置也没问题，"
@@ -288,6 +289,26 @@ public class SettingsActivity extends Activity {
         tv.setPadding(0, dp(10), 0, 0);
         root.addView(tv);
         return tv;
+    }
+
+    /** 「MC 设置」要写 /sdcard/.minecraft/artlauncher.json，同样需要所有文件访问权限 */
+    private void requestStoragePermission() {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                if (android.os.Environment.isExternalStorageManager()) return;
+                android.content.Intent i = new android.content.Intent(
+                        android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        android.net.Uri.parse("package:" + getPackageName()));
+                try {
+                    startActivity(i);
+                } catch (Throwable notFound) {
+                    startActivity(new android.content.Intent(
+                            android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+                }
+            }
+        } catch (Throwable t) {
+            android.util.Log.w("MCSETTINGS", "权限跳转失败", t);
+        }
     }
 
     private SeekBar seek(int min, int max, int val, IntSetter on) {

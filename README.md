@@ -18,6 +18,18 @@ Android ART 上直接跑。核心手段是
 | 自制「光影」后处理（bloom/ACES/调色/暗角/锐化） | ✅（`artshaders/`） |
 | Vulkan 后端 / 光追 / Iris 光影包运行时 | 🚧 实验性，见 `docs/` |
 
+## 两个构建产物
+
+| 产物 | 说明 |
+| --- | --- |
+| `mcprobe/mc-on-art.apk`（~57 MB） | **常规版**：不含资产，运行时读 `/sdcard/.minecraft/assets` |
+| `mcprobe/mc-on-art-assets.apk`（~518 MB） | **自用版**：内嵌 462 MB assets（`assets/mcassets.zip`），首次启动自动解压到 `/sdcard/.minecraft/assets`。⚠️ 含 Mojang 资产，**只能自用，不要分发** |
+
+自用版构建：`bash scripts/make_assets_zip.sh && ./build_all.sh`；想回到常规版：`bash scripts/make_assets_zip.sh --clean`。
+
+**权限**：首次启动会动态申请「所有文件访问」（Android 11+ 必须用户手动点一下）。
+未授权时不会启动游戏，而是跳系统授权页，授权后返回自动继续。
+
 ## 目录速览
 
 ```

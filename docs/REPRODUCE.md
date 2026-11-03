@@ -98,6 +98,23 @@ bash scripts/build_libsdex.sh
 
 ---
 
+## 4.1 自用版：把 assets 打进 APK（不发布）
+
+不想单独放 `/sdcard/.minecraft/assets` 时，可以把资产内嵌进 APK，首次启动自动解压：
+
+```bash
+bash scripts/make_assets_zip.sh          # /sdcard/.minecraft/assets -> mcprobe/assets/mcassets.zip（~462 MB）
+./build_all.sh                            # 产出 mcprobe/mc-on-art-assets.apk（~518 MB）
+
+bash scripts/make_assets_zip.sh --clean   # 删掉内嵌 zip，回到常规版
+```
+
+行为：APK 内路径 `assets/mcassets.zip`；`GlfwProbeActivity` 首次启动时解压到
+`/sdcard/.minecraft/assets` 并写 `.bundled-ok` 标记，之后启动直接跳过。
+解压发生在 MC bootstrap 之前的后台线程（约 30~60 秒，日志见 `内置 assets：已解 N 个文件`）。
+
+> ⚠️ 带 assets 的 APK 含 Mojang 资产，**只能自用，不可分发**。
+
 ## 5. 装机与运行
 
 ```bash
@@ -115,6 +132,11 @@ adb shell am start -W -n com.example.mcart/.SettingsActivity    # 设置入口�
 * `/sdcard/.minecraft/artlauncher.json`（「MC 设置」写入，样例 `examples/artlauncher.json`）
 
 ---
+
+**权限（必读）**：targetSdk 36 下 `MANAGE_EXTERNAL_STORAGE` 不能靠 manifest 自动获得。
+`GlfwProbeActivity` 启动时先**试写** `/sdcard/.minecraft`（`.perm-probe`），写不了就跳
+`ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION` 授权页，用户授权后 `onResume` 自动继续启动游戏。
+（某些 ROM 的 `isExternalStorageManager()` 会误报 true，所以以试写为准。）
 
 ## 6. 踩坑记录（省你几天）
 

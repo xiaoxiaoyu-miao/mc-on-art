@@ -17,6 +17,12 @@ public class GlfwProbeActivity extends SDLActivity {
 
     /** 游戏/资源目录定死在内部储存的 .minecraft（配合 MANAGE_EXTERNAL_STORAGE）。 */
     private static final String MC_HOME = "/sdcard/.minecraft";
+    /** APK 里内嵌的 assets 压缩包（自用版才有；首次启动解到 MC_HOME/assets） */
+    private static final String BUNDLED_ASSETS_ZIP = "mcassets.zip";
+
+    /** 游戏是否已启动（权限未授予时会等到 onResume 再启动） */
+    private volatile boolean mGameStarted = false;
+    private static final int REQ_STORAGE = 0x51;
 
     /**
      * 读 MC_HOME 下的一个「控制文件」（开关 / 参数），不存在或读失败返回 null。
@@ -176,8 +182,23 @@ public class GlfwProbeActivity extends SDLActivity {
         // Android 主线程阻塞超过 5 秒会 ANR 并被系统杀掉
         // （实测 "Input dispatching timed out ... not responding. Waited 5000ms"）。
         // 所以放到后台线程跑完，再回主线程做窗口/GL/Minecraft 初始化。
+        if (!ensureStoragePermission()) {
+            Log.w("GLFWPROBE", "缺「所有文件访问」权限：已跳转系统授权页，授权后回到前台自动继续");
+            android.widget.Toast.makeText(this,
+                    "请授予「所有文件访问」权限后返回，游戏会自动启动",
+                    android.widget.Toast.LENGTH_LONG).show();
+            return;      // 不启动游戏，onResume 里再试
+        }
+        startGameThread();
+    }
+
+    /** 启动 MC（bootstrap + 主循环），只允许一次 */
+    private void startGameThread() {
+        if (mGameStarted) return;
+        mGameStarted = true;
         new Thread(() -> {
             try {
+                extractBundledAssetsIfNeeded();
                 Class.forName("net.minecraft.SharedConstants", true,
                         getClassLoader()).getMethod("tryDetectVersion").invoke(null);
                 Log.i("GLFWPROBE", "SharedConstants.tryDetectVersion OK (bg)");
@@ -565,6 +586,7 @@ public class GlfwProbeActivity extends SDLActivity {
     protected void onResume() {
         super.onResume();
         hideSystemBars();
+        if (!mGameStarted && ensureStoragePermission()) startGameThread();   // 授权回来即启动
         applySurfaceFixedSize();   // surface 重建后要重新固定 buffer 尺寸
         attachFpsOverlay();    // 幂等：SDL 布局被重建时重新挂上
         attachVctlOverlay();   // 幂等：SDL 的 mLayout 被重建/我们的 View 被摘掉时重新挂上
@@ -612,6 +634,132 @@ public class GlfwProbeActivity extends SDLActivity {
                     + "（仅绘制，不吃触摸）");
         } catch (Throwable t) {
             Log.e("GLFWPROBE", "VCTL 浮层挂载失败（游戏照常运行，只是看不见按钮）", t);
+        }
+    }
+
+    // ── 存储权限：Android 11+ 必须用户手动授予「所有文件访问」 ──────────────
+    /**
+     * MC 要读写 /sdcard/.minecraft（assets/世界/配置都在那儿），targetSdk 36 下
+     * MANAGE_EXTERNAL_STORAGE 不能靠 manifest 自动获得，必须跳系统页让用户点一下。
+     * 返回 false 表示还没权限（已跳转授权页），调用方应稍后在 onResume 重试。
+     */
+    private boolean ensureStoragePermission() {
+        try {
+            // 先实测能不能写：某些 ROM（ColorOS 等）的 isExternalStorageManager()
+            // 与实际能力不一致（appops 全 deny 仍报 true），所以以「试写」为准。
+            if (canWriteMcHome()) return true;
+            Log.w("GLFWPROBE", "权限检查：写 " + MC_HOME + " 失败（isExternalStorageManager="
+                    + (android.os.Build.VERSION.SDK_INT >= 30
+                       && android.os.Environment.isExternalStorageManager()) + "）");
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                if (android.os.Environment.isExternalStorageManager()) {
+                    // 系统说已授权但实际写不了：仍然去授权页，让用户手动确认一次
+                    Log.w("GLFWPROBE", "系统报告已授权但实际写不了，跳授权页让用户确认");
+                }
+                Log.i("GLFWPROBE", "跳转「所有文件访问」授权页");
+                android.content.Intent i = new android.content.Intent(
+                        android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        android.net.Uri.parse("package:" + getPackageName()));
+                try {
+                    startActivity(i);
+                } catch (Throwable notFound) {
+                    startActivity(new android.content.Intent(
+                            android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+                }
+                return false;
+            }
+            // Android 10 及以下：普通运行时存储权限
+            String[] perms = {
+                    android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE };
+            boolean ok = true;
+            for (String pn : perms) {
+                if (checkSelfPermission(pn) != android.content.pm.PackageManager.PERMISSION_GRANTED) ok = false;
+            }
+            if (ok) return true;
+            requestPermissions(perms, REQ_STORAGE);
+            return false;
+        } catch (Throwable t) {
+            Log.e("GLFWPROBE", "权限检查失败（跳过检查，继续启动）", t);
+            return true;
+        }
+    }
+
+    /** 真实可写性探测：建目录 + 写一个探针文件再删掉 */
+    private boolean canWriteMcHome() {
+        try {
+            java.nio.file.Path dir = java.nio.file.Paths.get(MC_HOME);
+            java.nio.file.Files.createDirectories(dir);
+            java.nio.file.Path probe = dir.resolve(".perm-probe");
+            java.nio.file.Files.write(probe, new byte[]{1});
+            java.nio.file.Files.deleteIfExists(probe);
+            return true;
+        } catch (Throwable t) {
+            Log.w("GLFWPROBE", "写 " + MC_HOME + " 探测失败: " + t);
+            return false;
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
+        super.onRequestPermissionsResult(code, perms, results);
+        if (code == REQ_STORAGE && !mGameStarted && ensureStoragePermission()) startGameThread();
+    }
+
+    // ── 自用版：把 APK 里打包的 assets 解到 /sdcard/.minecraft/assets ──────
+    /**
+     * 只有「自用版」APK 才在 assets/ 里带 mcassets.zip（约 471MB 的 objects+indexes）。
+     * 首次启动解压一次；已有 assets（或解压标记）就跳过。
+     *
+     * 警告：带 assets 的 APK 含 Mojang 资产，只能自用，不可分发。
+     */
+    private void extractBundledAssetsIfNeeded() {
+        java.nio.file.Path assetsDir = java.nio.file.Paths.get(MC_HOME, "assets");
+        java.nio.file.Path mark = assetsDir.resolve(".bundled-ok");
+        try {
+            if (java.nio.file.Files.isRegularFile(mark)
+                    || java.nio.file.Files.isRegularFile(assetsDir.resolve("indexes/32.json"))) {
+                Log.i("GLFWPROBE", "内置 assets：已存在，跳过解压");
+                return;
+            }
+            getAssets().open(BUNDLED_ASSETS_ZIP).close();
+        } catch (java.io.FileNotFoundException e) {
+            Log.i("GLFWPROBE", "内置 assets：本 APK 未打包 assets（常规版），沿用外部目录");
+            return;
+        } catch (Throwable t) {
+            Log.w("GLFWPROBE", "内置 assets：探测失败，按未打包处理", t);
+            return;
+        }
+
+        long t0 = System.currentTimeMillis();
+        int files = 0;
+        try {
+            Log.i("GLFWPROBE", "内置 assets：首次运行，开始解压到 " + assetsDir + " ...");
+            java.nio.file.Files.createDirectories(assetsDir);
+            try (java.io.InputStream raw = getAssets().open(BUNDLED_ASSETS_ZIP);
+                 java.util.zip.ZipInputStream zin =
+                         new java.util.zip.ZipInputStream(new java.io.BufferedInputStream(raw, 1 << 16))) {
+                byte[] buf = new byte[1 << 16];
+                java.util.zip.ZipEntry e;
+                while ((e = zin.getNextEntry()) != null) {
+                    java.nio.file.Path out = assetsDir.resolve(e.getName()).normalize();
+                    if (!out.startsWith(assetsDir)) continue;
+                    if (e.isDirectory()) { java.nio.file.Files.createDirectories(out); continue; }
+                    java.nio.file.Files.createDirectories(out.getParent());
+                    try (java.io.OutputStream os = java.nio.file.Files.newOutputStream(out)) {
+                        int r;
+                        while ((r = zin.read(buf)) > 0) os.write(buf, 0, r);
+                    }
+                    if (++files % 500 == 0) {
+                        Log.i("GLFWPROBE", "内置 assets：已解 " + files + " 个文件");
+                    }
+                }
+            }
+            java.nio.file.Files.write(mark, "ok".getBytes());
+            Log.i("GLFWPROBE", "内置 assets：解压完成 " + files + " 个文件，用时 "
+                    + (System.currentTimeMillis() - t0) + " ms");
+        } catch (Throwable t) {
+            Log.e("GLFWPROBE", "内置 assets：解压失败（已解 " + files + " 个）——游戏可能因缺资源起不来", t);
         }
     }
 
