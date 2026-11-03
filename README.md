@@ -29,7 +29,7 @@ lwjglbuild/             liblwjgl.so 的 Android 构建（ART 适配版 MemoryUti
 artshaders/             自制后处理链资源（post_effect/*.json + shaders/post/*.fsh）
 scripts/                复刻脚本：抓官方输入 / 反编译 / 生成 mc65.jar / 编 shim / 编 libsdex
 examples/               vcontrols.txt、artlauncher.json 样例
-docs/                   设计与踩坑记录（建议先读 docs/HANDOVER-NEXT.md 和 docs/HANDOVER-SHADER.md）
+docs/                   REPRODUCE.md（从零复刻）+ PATCHES.md（补丁记录）+ PORTING.md（移植分析）
 ```
 
 ## 想自己复刻
