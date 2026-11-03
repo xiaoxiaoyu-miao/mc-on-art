@@ -182,6 +182,7 @@ public class GlfwProbeActivity extends SDLActivity {
         // Android 主线程阻塞超过 5 秒会 ANR 并被系统杀掉
         // （实测 "Input dispatching timed out ... not responding. Waited 5000ms"）。
         // 所以放到后台线程跑完，再回主线程做窗口/GL/Minecraft 初始化。
+        logApiCompat();
         if (!ensureStoragePermission()) {
             Log.w("GLFWPROBE", "缺「所有文件访问」权限：已跳转系统授权页，授权后回到前台自动继续");
             android.widget.Toast.makeText(this,
@@ -682,6 +683,57 @@ public class GlfwProbeActivity extends SDLActivity {
         } catch (Throwable t) {
             Log.e("GLFWPROBE", "权限检查失败（跳过检查，继续启动）", t);
             return true;
+        }
+    }
+
+    // ── 老设备兼容性自查：把缺失的 Java API 打出来，方便远程排查 ──────────
+    /**
+     * MC 26.2 是按 Java 25 编的，部分 API 在老 Android 上不存在
+     * （最典型的是 java.lang.StackWalker，只有 API 34+ 才有）。
+     * 这里在启动最早期把关键类的存在性打一条日志，方便对着 logcat 定位缺什么。
+     */
+    private void logApiCompat() {
+        StringBuilder sb = new StringBuilder();
+        try {
+            sb.append("=== API 兼容性自查 ===\n");
+            sb.append("SDK_INT=").append(android.os.Build.VERSION.SDK_INT)
+              .append("  release=").append(android.os.Build.VERSION.RELEASE)
+              .append("  model=").append(android.os.Build.MODEL)
+              .append("  abi=").append(android.os.Build.SUPPORTED_ABIS.length > 0
+                                        ? android.os.Build.SUPPORTED_ABIS[0] : "?").append("\n");
+            probeClass(sb, "java.lang.StackWalker");
+            probeClass(sb, "java.lang.StackWalker$Option");
+            probeClass(sb, "java.util.SequencedCollection");
+            probeClass(sb, "java.util.SequencedMap");
+            probeClass(sb, "java.util.HexFormat");
+            probeClass(sb, "java.util.random.RandomGenerator");
+            try {
+                java.lang.Math.class.getMethod("clamp", long.class, int.class, int.class);
+                sb.append("有  Math.clamp\n");
+            } catch (Throwable t) {
+                sb.append("缺  Math.clamp\n");
+            }
+            sb.append("=== 自查结束 ===\n");
+        } catch (Throwable t) {
+            sb.append("自查失败: ").append(t).append('\n');
+        }
+        for (String line : sb.toString().split("\n")) Log.i("GLFWPROBE", line);
+        // logcat 在 ColorOS 上会被限流丢行，落盘一份方便远程排查
+        try {
+            java.nio.file.Path f = java.nio.file.Paths.get(MC_HOME, "api-compat.log");
+            java.nio.file.Files.createDirectories(f.getParent());
+            java.nio.file.Files.write(f, sb.toString().getBytes("UTF-8"));
+        } catch (Throwable t) {
+            Log.w("GLFWPROBE", "自查结果落盘失败（可能没存储权限）", t);
+        }
+    }
+
+    private void probeClass(StringBuilder sb, String name) {
+        try {
+            Class.forName(name);
+            sb.append("有  ").append(name).append('\n');
+        } catch (Throwable t) {
+            sb.append("缺  ").append(name).append('\n');
         }
     }
 
